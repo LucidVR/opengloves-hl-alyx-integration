@@ -166,6 +166,7 @@ namespace sidecar_filewatcher
                 switch (input)
                 {
                     case "stop":
+                        Console.WriteLine("Exiting...");
                         checkTimer.Dispose();
                         consoleCancellationToken.Cancel();
                         isRunning = false;

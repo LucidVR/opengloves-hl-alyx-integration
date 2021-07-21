@@ -22,7 +22,9 @@
         "icons/icon.ico"
       ],
       "resources": [],
-      "externalBin": [],
+      "externalBin": [
+        "sidecar-filewatcher"
+      ],
       "copyright": "",
       "category": "DeveloperTool",
       "shortDescription": "",

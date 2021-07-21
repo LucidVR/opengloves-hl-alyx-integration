@@ -6,6 +6,7 @@
     <RootNamespace>sidecar_filewatcher</RootNamespace>
     <ApplicationIcon />
     <StartupObject />
+    <AssemblyName>sidecar-filewatcher-x86_64-pc-windows-msvc</AssemblyName>
   </PropertyGroup>
 
 </Project>
