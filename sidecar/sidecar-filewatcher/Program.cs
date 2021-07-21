@@ -123,6 +123,7 @@ namespace sidecar_filewatcher
             using FileChecker checker = new FileChecker(dataIn.path);
             Console.WriteLine("Initalised File Watcher");
 
+            Console.WriteLine("Awaiting server. Try opening SteamVR with driver active if this process is hanging");
             NamedPipesProvider rightNamedPipeProvider = new NamedPipesProvider(true);
             rightNamedPipeProvider.Connect();
             Console.WriteLine("Created Right Pipe");
@@ -150,6 +151,8 @@ namespace sidecar_filewatcher
                             NamedPipesProvider pipe = line.Contains(dataIn.invertHands ? "[Right]" : "[Left]") ? ref rightNamedPipeProvider : ref leftNamedPipeProvider;
 
                             pipe.Send(ffbInput);
+
+                            Console.WriteLine("Sent force feedback message: " + ffb.ToString());
                         }
                     }
                 };

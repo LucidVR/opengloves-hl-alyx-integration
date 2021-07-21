@@ -33,10 +33,11 @@
 
     const beginSidecar = async () => {
         let stdin = {
-            path: (path + "/game/hlvr/console.log").replace(/\//g, '\\'),
+            path: (path + "/game/hlvr/console.log").replace(/\/$/, "").replace(/\//g, '\\'),
             invertHands: invertHands === 'true'
         };
 
+        console.log(JSON.stringify(stdin).replace(/\\n/g, ''));
         sidecar = Command.sidecar('sidecar-filewatcher');
         sidecar.stdout.on('data', e => {
             stdout = [...stdout, e];
@@ -53,10 +54,20 @@
         isListening = true;
     };
 
-    const stopListening = () => {
-        stdout = ['...'];
+    const stopListening = async () => {
+
         child.write("stop\n");
-        isListening = false;
+
+        window.setTimeout(async () => {
+            try {
+                await child.kill();
+                stdout = ['...'];
+                isListening = false;
+            } catch (e) {
+                console.trace(e);
+            }
+        }, 1000);
+
     };
 </script>
 <div class="w-full flex flex-col justify-center items-center">
