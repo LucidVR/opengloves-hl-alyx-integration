@@ -93,48 +93,63 @@ namespace sidecar_filewatcher
 
         static void Main(string[] args)
         {
-
-           // string path = Console.In.ReadLine();
-            using var watcher = new FileSystemWatcher(@"E:\Games\SteamLibrary\steamapps\common\Half-Life Alyx\game\hlvr");
-
-            watcher.NotifyFilter = NotifyFilters.Attributes
-                                 | NotifyFilters.CreationTime
-                                 | NotifyFilters.DirectoryName
-                                 | NotifyFilters.FileName
-                                 | NotifyFilters.LastAccess
-                                 | NotifyFilters.LastWrite
-                                 | NotifyFilters.Security
-                                 | NotifyFilters.Size;
-
-            watcher.Filter = "*.log";
-
-            watcher.Error += OnError;
-            watcher.Changed += (object sender, FileSystemEventArgs e) =>
+            String path = @"D:\Steam\steamapps\common\Half-Life Alyx\game\hlvr\console.log";
+            var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+            using (var sr = new StreamReader(fs))
             {
-                Console.WriteLine($"Changed: {e.FullPath}");
-                if (e.ChangeType != WatcherChangeTypes.Changed) return;
-
-                Console.WriteLine($"Changed: {e.FullPath}");
-            };
-
-            watcher.EnableRaisingEvents = true;
-
-            var consoleCancellationToken = new CancellationTokenSource();
-            ListenToConsole((string input) =>
-            {
-                switch (input)
+                string line;
+                // Read and display lines from the file until the end of
+                // the file is reached.
+                while ((line = sr.ReadLine()) != null)
                 {
-                    case "stop":
-                        Console.WriteLine("Received Stop");
-                        consoleCancellationToken.Cancel();
-                        break;
+                    Console.WriteLine(line);
                 }
 
-            }, consoleCancellationToken);
+                using var watcher = new FileSystemWatcher(@"D:\Steam\steamapps\common\Half-Life Alyx\game\hlvr");
 
-            Console.ReadKey(false);
+                watcher.NotifyFilter = NotifyFilters.Attributes
+                                     | NotifyFilters.CreationTime
+                                     | NotifyFilters.DirectoryName
+                                     | NotifyFilters.FileName
+                                     | NotifyFilters.LastAccess
+                                     | NotifyFilters.LastWrite
+                                     | NotifyFilters.Security
+                                     | NotifyFilters.Size;
+
+                watcher.Filter = "*.log";
+
+                watcher.Error += OnError;
+                watcher.Changed += (object sender, FileSystemEventArgs e) =>
+                {
+                    Console.WriteLine($"Event: {e.FullPath}");
+                    if (e.ChangeType != WatcherChangeTypes.Changed) return;
+
+                    while ((line = sr.ReadLine()) != null)
+                    {
+                        Console.WriteLine(line);
+                    }
+                };
+
+                watcher.EnableRaisingEvents = true;
+
+                var consoleCancellationToken = new CancellationTokenSource();
+                ListenToConsole((string input) =>
+                {
+                    switch (input)
+                    {
+                        case "stop":
+                            Console.WriteLine("Received Stop");
+                            consoleCancellationToken.Cancel();
+                            break;
+                    }
+
+                }, consoleCancellationToken);
+
+                Console.ReadKey(false);
+
+            }
         }
-
+        
 
     }
 }
