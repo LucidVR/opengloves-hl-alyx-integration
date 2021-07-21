@@ -154,6 +154,16 @@ namespace sidecar_filewatcher
                 watcher.EnableRaisingEvents = true;
 
 
+                TimerCallback tCallback = (x) => {
+                    while ((line = checker.GetNextLine()) != null)
+                    {
+                        Console.WriteLine(line);
+                    }; 
+                };
+                var checkTimer = new Timer(tCallback);
+                checkTimer.Change(0, 10);
+
+
                 var consoleCancellationToken = new CancellationTokenSource();
                 ListenToConsole((string input) =>
                 {
