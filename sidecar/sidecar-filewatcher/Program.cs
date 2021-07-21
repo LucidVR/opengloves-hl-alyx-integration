@@ -76,22 +76,48 @@ namespace sidecar_filewatcher
                 }
             }, cancellationToken.Token);
         }
+        private static void OnError(object sender, ErrorEventArgs e) =>
+            PrintException(e.GetException());
+
+        private static void PrintException(Exception? ex)
+        {
+            if (ex != null)
+            {
+                Console.WriteLine($"Message: {ex.Message}");
+                Console.WriteLine("Stacktrace:");
+                Console.WriteLine(ex.StackTrace);
+                Console.WriteLine();
+                PrintException(ex.InnerException);
+            }
+        }
 
         static void Main(string[] args)
         {
 
-            string path = Console.In.ReadLine();
-            using var watcher = new FileSystemWatcher(@path);
+           // string path = Console.In.ReadLine();
+            using var watcher = new FileSystemWatcher(@"E:\Games\SteamLibrary\steamapps\common\Half-Life Alyx\game\hlvr");
 
-            watcher.NotifyFilter = NotifyFilters.LastWrite
-                                   | NotifyFilters.LastAccess;
+            watcher.NotifyFilter = NotifyFilters.Attributes
+                                 | NotifyFilters.CreationTime
+                                 | NotifyFilters.DirectoryName
+                                 | NotifyFilters.FileName
+                                 | NotifyFilters.LastAccess
+                                 | NotifyFilters.LastWrite
+                                 | NotifyFilters.Security
+                                 | NotifyFilters.Size;
 
+            watcher.Filter = "*.log";
+
+            watcher.Error += OnError;
             watcher.Changed += (object sender, FileSystemEventArgs e) =>
             {
+                Console.WriteLine($"Changed: {e.FullPath}");
                 if (e.ChangeType != WatcherChangeTypes.Changed) return;
 
                 Console.WriteLine($"Changed: {e.FullPath}");
             };
+
+            watcher.EnableRaisingEvents = true;
 
             var consoleCancellationToken = new CancellationTokenSource();
             ListenToConsole((string input) =>
@@ -99,11 +125,14 @@ namespace sidecar_filewatcher
                 switch (input)
                 {
                     case "stop":
+                        Console.WriteLine("Received Stop");
                         consoleCancellationToken.Cancel();
                         break;
                 }
 
             }, consoleCancellationToken);
+
+            Console.ReadKey(false);
         }
 
 
