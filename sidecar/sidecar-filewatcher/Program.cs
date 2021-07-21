@@ -4,6 +4,7 @@ using System.IO.Pipes;
 using System.Runtime.InteropServices;
 using System.Threading;
 using System.Threading.Tasks;
+using System.Text.Json;
 
 namespace sidecar_filewatcher
 {
@@ -30,7 +31,7 @@ namespace sidecar_filewatcher
         private NamedPipeClientStream _pipe;
         public NamedPipesProvider(bool isRightHand)
         {
-            _pipe = new NamedPipeClientStream("vrapplication/ffb/curl/" + isRightHand);
+            _pipe = new NamedPipeClientStream("vrapplication/ffb/curl/" + (isRightHand ? "right" : "left"));
         }
 
         public void Connect()
@@ -65,11 +66,11 @@ namespace sidecar_filewatcher
 
     class FileChecker : IDisposable
     {
-        private String path = @"D:\Steam\steamapps\common\Half-Life Alyx\game\hlvr\console.log";
+        private string path;
         private FileStream fs;
         private StreamReader sr;
 
-        public FileChecker()
+        public FileChecker(string path)
         {
             fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
             sr = new StreamReader(fs);
@@ -77,13 +78,26 @@ namespace sidecar_filewatcher
 
         public String GetNextLine()
         {
-            return sr.ReadLine();
+            try
+            {
+                return sr.ReadLine();
+            }
+            catch (Exception e)
+            {
+                return "";
+            }
         }
 
         public void Dispose()
         {
             sr.Dispose();
         }
+    }
+
+    class ConsoleIn
+    {
+        public string path { get; set; }
+        public bool invertHands { get; set; }
     }
 
     class Program
@@ -99,89 +113,77 @@ namespace sidecar_filewatcher
                 }
             }, cancellationToken.Token);
         }
-        private static void OnError(object sender, ErrorEventArgs e) =>
-            PrintException(e.GetException());
-
-        private static void PrintException(Exception? ex)
-        {
-            if (ex != null)
-            {
-                Console.WriteLine($"Message: {ex.Message}");
-                Console.WriteLine("Stacktrace:");
-                Console.WriteLine(ex.StackTrace);
-                Console.WriteLine();
-                PrintException(ex.InnerException);
-            }
-        }
 
         static void Main(string[] args)
         {
-            using (FileChecker checker = new FileChecker())
+            string input = Console.ReadLine();
+
+            ConsoleIn dataIn = JsonSerializer.Deserialize<ConsoleIn>(input);
+
+            using FileChecker checker = new FileChecker(dataIn.path);
+            Console.WriteLine("Initalised File Watcher");
+
+            NamedPipesProvider rightNamedPipeProvider = new NamedPipesProvider(true);
+            rightNamedPipeProvider.Connect();
+            Console.WriteLine("Created Right Pipe");
+
+            NamedPipesProvider leftNamedPipeProvider = new NamedPipesProvider(false);
+            leftNamedPipeProvider.Connect();
+            Console.WriteLine("Created Left Pipe");
+
+            string line;
+            Console.WriteLine("Connected successfully");
+
+            TimerCallback tCallback = (x) =>
             {
-                string line;
-                // Read and display lines from the file until the end of
-                // the file is reached.
                 while ((line = checker.GetNextLine()) != null)
                 {
-                    Console.WriteLine(line);
+                    if (line != null && line.Contains("[OpenGlovesParse]"))
+                    {
+                        string[] split = line.Split('(', ')');
+                        if(split.Length > 0)
+                        {
+                            short[] ffb = Array.ConvertAll(split[1].Split(','), short.Parse);
+
+                            VRFFBInput ffbInput = new VRFFBInput(ffb[0], ffb[1], ffb[2], ffb[3], ffb[4]);
+
+                            NamedPipesProvider pipe = line.Contains(dataIn.invertHands ? "[Right]" : "[Left]") ? ref rightNamedPipeProvider : ref leftNamedPipeProvider;
+
+                            pipe.Send(ffbInput);
+                        }
+                    }
+                };
+            };
+
+            var checkTimer = new Timer(tCallback);
+            checkTimer.Change(0, 10);
+
+            var consoleCancellationToken = new CancellationTokenSource();
+
+            bool isRunning = true;
+            ListenToConsole((string input) =>
+            {
+                switch (input)
+                {
+                    case "stop":
+                        checkTimer.Dispose();
+                        consoleCancellationToken.Cancel();
+                        isRunning = false;
+                        break;
                 }
 
-                using var watcher = new FileSystemWatcher(@"D:\Steam\steamapps\common\Half-Life Alyx\game\hlvr");
+            }, consoleCancellationToken);
 
-                watcher.NotifyFilter = NotifyFilters.Attributes
-                                     | NotifyFilters.CreationTime
-                                     | NotifyFilters.DirectoryName
-                                     | NotifyFilters.FileName
-                                     | NotifyFilters.LastAccess
-                                     | NotifyFilters.LastWrite
-                                     | NotifyFilters.Security
-                                     | NotifyFilters.Size;
 
-                watcher.Filter = "*.log";
-
-                watcher.Error += OnError;
-                watcher.Changed += (object sender, FileSystemEventArgs e) =>
+            Task t = Task.Run(async () => {
+                do
                 {
-                    Console.WriteLine($"Event: {e.FullPath}");
-                    if (e.ChangeType != WatcherChangeTypes.Changed) return;
+                    await Task.Delay(10);
+                } while (isRunning);
+            });
 
-                    while ((line = checker.GetNextLine()) != null)
-                    {
-                        Console.WriteLine(line);
-                    }
-                };
-
-                watcher.EnableRaisingEvents = true;
-
-
-                TimerCallback tCallback = (x) => {
-                    while ((line = checker.GetNextLine()) != null)
-                    {
-                        Console.WriteLine(line);
-                    }; 
-                };
-                var checkTimer = new Timer(tCallback);
-                checkTimer.Change(0, 10);
-
-
-                var consoleCancellationToken = new CancellationTokenSource();
-                ListenToConsole((string input) =>
-                {
-                    switch (input)
-                    {
-                        case "stop":
-                            Console.WriteLine("Received Stop");
-                            consoleCancellationToken.Cancel();
-                            break;
-                    }
-
-                }, consoleCancellationToken);
-
-                Console.ReadKey(false);
-
-            }
+            t.Wait();
         }
-        
 
     }
 }
