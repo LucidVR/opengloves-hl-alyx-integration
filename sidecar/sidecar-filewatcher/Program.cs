@@ -63,6 +63,29 @@ namespace sidecar_filewatcher
         }
     }
 
+    class FileChecker : IDisposable
+    {
+        private String path = @"D:\Steam\steamapps\common\Half-Life Alyx\game\hlvr\console.log";
+        private FileStream fs;
+        private StreamReader sr;
+
+        public FileChecker()
+        {
+            fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+            sr = new StreamReader(fs);
+        }
+
+        public String GetNextLine()
+        {
+            return sr.ReadLine();
+        }
+
+        public void Dispose()
+        {
+            sr.Dispose();
+        }
+    }
+
     class Program
     {
         public static void ListenToConsole(Action<string> onMessageFromParent, CancellationTokenSource cancellationToken)
@@ -93,14 +116,12 @@ namespace sidecar_filewatcher
 
         static void Main(string[] args)
         {
-            String path = @"D:\Steam\steamapps\common\Half-Life Alyx\game\hlvr\console.log";
-            var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
-            using (var sr = new StreamReader(fs))
+            using (FileChecker checker = new FileChecker())
             {
                 string line;
                 // Read and display lines from the file until the end of
                 // the file is reached.
-                while ((line = sr.ReadLine()) != null)
+                while ((line = checker.GetNextLine()) != null)
                 {
                     Console.WriteLine(line);
                 }
@@ -124,13 +145,14 @@ namespace sidecar_filewatcher
                     Console.WriteLine($"Event: {e.FullPath}");
                     if (e.ChangeType != WatcherChangeTypes.Changed) return;
 
-                    while ((line = sr.ReadLine()) != null)
+                    while ((line = checker.GetNextLine()) != null)
                     {
                         Console.WriteLine(line);
                     }
                 };
 
                 watcher.EnableRaisingEvents = true;
+
 
                 var consoleCancellationToken = new CancellationTokenSource();
                 ListenToConsole((string input) =>
