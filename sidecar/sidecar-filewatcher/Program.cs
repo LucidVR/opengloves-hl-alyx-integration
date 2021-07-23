@@ -26,6 +26,26 @@ namespace sidecar_filewatcher
         public short ringCurl;
         public short pinkyCurl;
     };
+
+
+    class StatusChecker
+    {
+        private int invokeCount;
+        private int maxCount;
+
+        public StatusChecker(int count)
+        {
+            invokeCount = 0;
+            maxCount = count;
+        }
+
+        // This method is called by the timer delegate.
+        public void CheckStatus(Object stateInfo)
+        {
+            AutoResetEvent autoEvent = (AutoResetEvent)stateInfo;
+        }
+    }
+
     class NamedPipesProvider
     {
         private NamedPipeClientStream _pipe;
@@ -66,31 +86,32 @@ namespace sidecar_filewatcher
 
     class FileChecker : IDisposable
     {
-        private string path;
-        private FileStream fs;
-        private StreamReader sr;
+        private string _path;
+        private FileStream _fs;
+        private StreamReader _sr;
 
         public FileChecker(string path)
         {
-            fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
-            sr = new StreamReader(fs);
+            _fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+            _sr = new StreamReader(_fs);
         }
 
         public String GetNextLine()
         {
             try
             {
-                return sr.ReadLine();
+                return _sr.ReadLine();
             }
             catch (Exception e)
             {
+                Console.WriteLine("Err: " + e.Message);
                 return "";
             }
         }
 
         public void Dispose()
         {
-            sr.Dispose();
+            _sr.Dispose();
         }
     }
 
@@ -114,79 +135,92 @@ namespace sidecar_filewatcher
             }, cancellationToken.Token);
         }
 
-        static void Main(string[] args)
+        public static void ListenAndSend(NamedPipesProvider pipeProvider, string path, bool isRightHand)
         {
-            string input = Console.ReadLine();
+            Console.WriteLine("Initialising file checker...");
+            using FileChecker fileChecker = new FileChecker(path);
+            Console.WriteLine("Initalised file checker...");
 
-            ConsoleIn dataIn = JsonSerializer.Deserialize<ConsoleIn>(input);
-
-            using FileChecker checker = new FileChecker(dataIn.path);
-            Console.WriteLine("Initalised File Watcher");
-
-            Console.WriteLine("Awaiting server. Try opening SteamVR with driver active if this process is hanging");
-            NamedPipesProvider rightNamedPipeProvider = new NamedPipesProvider(true);
-            rightNamedPipeProvider.Connect();
-            Console.WriteLine("Created Right Pipe");
-
-            NamedPipesProvider leftNamedPipeProvider = new NamedPipesProvider(false);
-            leftNamedPipeProvider.Connect();
-            Console.WriteLine("Created Left Pipe");
-
+            Console.WriteLine("Awaiting connection for a pipe");
+            pipeProvider.Connect();
+            Console.WriteLine("Pipe connected successfully");
+            Console.WriteLine((isRightHand ? "Right" : "Left") + " (in-game) ready and listening for input");
             string line;
-            Console.WriteLine("Connected successfully");
 
             TimerCallback tCallback = (x) =>
             {
-                while ((line = checker.GetNextLine()) != null)
+                while ((line = fileChecker.GetNextLine()) != null)
                 {
                     if (line != null && line.Contains("[OpenGlovesParse]"))
                     {
-                        string[] split = line.Split('(', ')');
-                        if(split.Length > 0)
+                        if ((isRightHand && line.Contains("{Right}")) || (!isRightHand && line.Contains("{Left}")))
                         {
-                            short[] ffb = Array.ConvertAll(split[1].Split(','), short.Parse);
+                            string[] split = line.Split('(', ')');
+                            if (split.Length > 0)
+                            {
+                                short[] ffb = Array.ConvertAll(split[1].Split(','), short.Parse);
 
-                            VRFFBInput ffbInput = new VRFFBInput(ffb[0], ffb[1], ffb[2], ffb[3], ffb[4]);
+                                VRFFBInput ffbInput = new VRFFBInput(ffb[0], ffb[1], ffb[2], ffb[3], ffb[4]);
 
-                            NamedPipesProvider pipe = line.Contains(dataIn.invertHands ? "[Right]" : "[Left]") ? ref rightNamedPipeProvider : ref leftNamedPipeProvider;
+                                pipeProvider.Send(ffbInput);
 
-                            pipe.Send(ffbInput);
-
-                            Console.WriteLine("Sent force feedback message: " + ffb.ToString());
+                                Console.WriteLine("Sent force feedback message");
+                            }
                         }
+
                     }
+                    Thread.Sleep(10);
                 };
             };
 
             var checkTimer = new Timer(tCallback);
             checkTimer.Change(0, 10);
 
+            ManualResetEvent stayAlive = new ManualResetEvent(false);
+            stayAlive.WaitOne();
+        }
+        static void Main(string[] args)
+        {
+            string input = Console.ReadLine();
+
+            ConsoleIn dataIn = JsonSerializer.Deserialize<ConsoleIn>(input);
+
+            Console.WriteLine("Data in: Path: " + dataIn.path + ", Inverted hands: " + (dataIn.invertHands ? "yes" : "no"));
+
+            Console.WriteLine("Initialising Pipes...");
+            NamedPipesProvider pipeProvider_right = new NamedPipesProvider(true);
+            NamedPipesProvider pipeProvider_left = new NamedPipesProvider(false);
+            Console.WriteLine("Pipes initialised");
+
+            Thread listenAndSendThread_right = new Thread(new ThreadStart(() => ListenAndSend(pipeProvider_right, dataIn.path, !dataIn.invertHands)));
+            Thread listenAndSendThread_left = new Thread(new ThreadStart(() => ListenAndSend(pipeProvider_left, dataIn.path, dataIn.invertHands)));
+
+            Console.WriteLine("Awaiting connection to pipes... Try opening SteamVR with driver active if this process is hanging");
+            listenAndSendThread_right.Start();
+            listenAndSendThread_left.Start();
+
+
             var consoleCancellationToken = new CancellationTokenSource();
 
-            bool isRunning = true;
             ListenToConsole((string input) =>
             {
                 switch (input)
                 {
                     case "stop":
                         Console.WriteLine("Exiting...");
-                        checkTimer.Dispose();
+                        listenAndSendThread_right.Abort();
+                        listenAndSendThread_left.Abort();
                         consoleCancellationToken.Cancel();
-                        isRunning = false;
                         break;
                 }
 
             }, consoleCancellationToken);
 
+            listenAndSendThread_left.Join();
+            listenAndSendThread_right.Join();
 
-            Task t = Task.Run(async () => {
-                do
-                {
-                    await Task.Delay(10);
-                } while (isRunning);
-            });
-
-            t.Wait();
+            Console.WriteLine("Finished??");
+            
         }
 
     }

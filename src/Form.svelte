@@ -32,12 +32,12 @@
     let child;
 
     const beginSidecar = async () => {
+        console.log(invertHands);
         let stdin = {
             path: (path + "/game/hlvr/console.log").replace(/\/$/, "").replace(/\//g, '\\'),
-            invertHands: invertHands === 'true'
+            invertHands: !!invertHands
         };
 
-        console.log(JSON.stringify(stdin).replace(/\\n/g, ''));
         sidecar = Command.sidecar('sidecar-filewatcher');
         sidecar.stdout.on('data', e => {
             stdout = [...stdout, e];
