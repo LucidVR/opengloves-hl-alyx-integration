@@ -27,29 +27,10 @@ namespace sidecar_filewatcher
         public short pinkyCurl;
     };
 
-
-    class StatusChecker
-    {
-        private int invokeCount;
-        private int maxCount;
-
-        public StatusChecker(int count)
-        {
-            invokeCount = 0;
-            maxCount = count;
-        }
-
-        // This method is called by the timer delegate.
-        public void CheckStatus(Object stateInfo)
-        {
-            AutoResetEvent autoEvent = (AutoResetEvent)stateInfo;
-        }
-    }
-
-    class NamedPipesProvider
+    class NamedPipeProvider : IDisposable
     {
         private NamedPipeClientStream _pipe;
-        public NamedPipesProvider(bool isRightHand)
+        public NamedPipeProvider(bool isRightHand)
         {
             _pipe = new NamedPipeClientStream("vrapplication/ffb/curl/" + (isRightHand ? "right" : "left"));
         }
@@ -57,6 +38,11 @@ namespace sidecar_filewatcher
         public void Connect()
         {
             _pipe.Connect();
+        }
+
+        public void Dispose()
+        {
+            Disconnect();
         }
 
         public void Disconnect()
@@ -104,13 +90,14 @@ namespace sidecar_filewatcher
             }
             catch (Exception e)
             {
-                Console.WriteLine("Err: " + e.Message);
+                Console.WriteLine("Err Reading: " + e.Message);
                 return "";
             }
         }
 
         public void Dispose()
         {
+            _fs.Dispose();
             _sr.Dispose();
         }
     }
@@ -135,19 +122,17 @@ namespace sidecar_filewatcher
             }, cancellationToken.Token);
         }
 
-        public static void ListenAndSend(NamedPipesProvider pipeProvider, string path, bool isRightHand)
+        public static void ListenAndSend(string path, ref NamedPipeProvider pipeProvider, bool isRightHand, CancellationToken ct)
         {
-            Console.WriteLine("Initialising file checker...");
             using FileChecker fileChecker = new FileChecker(path);
-            Console.WriteLine("Initalised file checker...");
 
-            Console.WriteLine("Awaiting connection for a pipe");
+            Console.WriteLine("Awaiting connection for a pipe...");
             pipeProvider.Connect();
             Console.WriteLine("Pipe connected successfully");
             Console.WriteLine((isRightHand ? "Right" : "Left") + " (in-game) ready and listening for input");
             string line;
 
-            TimerCallback tCallback = (x) =>
+            while (!ct.IsCancellationRequested)
             {
                 while ((line = fileChecker.GetNextLine()) != null)
                 {
@@ -169,15 +154,9 @@ namespace sidecar_filewatcher
                         }
 
                     }
-                    Thread.Sleep(10);
                 };
-            };
-
-            var checkTimer = new Timer(tCallback);
-            checkTimer.Change(0, 10);
-
-            ManualResetEvent stayAlive = new ManualResetEvent(false);
-            stayAlive.WaitOne();
+                Thread.Sleep(10);
+            }
         }
         static void Main(string[] args)
         {
@@ -187,13 +166,15 @@ namespace sidecar_filewatcher
 
             Console.WriteLine("Data in: Path: " + dataIn.path + ", Inverted hands: " + (dataIn.invertHands ? "yes" : "no"));
 
-            Console.WriteLine("Initialising Pipes...");
-            NamedPipesProvider pipeProvider_right = new NamedPipesProvider(true);
-            NamedPipesProvider pipeProvider_left = new NamedPipesProvider(false);
             Console.WriteLine("Pipes initialised");
+            CancellationTokenSource right_cts = new CancellationTokenSource();
+            CancellationTokenSource left_cts = new CancellationTokenSource();
 
-            Thread listenAndSendThread_right = new Thread(new ThreadStart(() => ListenAndSend(pipeProvider_right, dataIn.path, !dataIn.invertHands)));
-            Thread listenAndSendThread_left = new Thread(new ThreadStart(() => ListenAndSend(pipeProvider_left, dataIn.path, dataIn.invertHands)));
+            NamedPipeProvider right_pipeProvider = new NamedPipeProvider(true);
+            NamedPipeProvider left_pipeProvider = new NamedPipeProvider(false);
+
+            Thread listenAndSendThread_right = new Thread(new ThreadStart(() => ListenAndSend(dataIn.path, ref right_pipeProvider, dataIn.invertHands, right_cts.Token)));
+            Thread listenAndSendThread_left = new Thread(new ThreadStart(() => ListenAndSend(dataIn.path, ref left_pipeProvider , !dataIn.invertHands, left_cts.Token)));
 
             Console.WriteLine("Awaiting connection to pipes... Try opening SteamVR with driver active if this process is hanging");
             listenAndSendThread_right.Start();
@@ -201,15 +182,14 @@ namespace sidecar_filewatcher
 
 
             var consoleCancellationToken = new CancellationTokenSource();
-
             ListenToConsole((string input) =>
             {
                 switch (input)
                 {
                     case "stop":
                         Console.WriteLine("Exiting...");
-                        listenAndSendThread_right.Abort();
-                        listenAndSendThread_left.Abort();
+                        right_cts.Cancel();
+                        left_cts.Cancel();
                         consoleCancellationToken.Cancel();
                         break;
                 }
@@ -219,8 +199,7 @@ namespace sidecar_filewatcher
             listenAndSendThread_left.Join();
             listenAndSendThread_right.Join();
 
-            Console.WriteLine("Finished??");
-            
+            Console.WriteLine("Listener exiting...");
         }
 
     }
